@@ -1,0 +1,5 @@
+.venv
+kafka
+minio
+cmds.sh
+apps/test

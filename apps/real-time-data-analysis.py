@@ -1,19 +1,25 @@
-from importlib.resources import Package
 from pyspark.sql import SparkSession
 from pyspark.sql.types import *
 from pyspark.sql.functions import *
-import os
+import configparser
 
-KAFKA_TOPIC_NAME  = "sessions"
-KAFKA_BOOTSTRAP_SERVER = "kafka:9092"
+# Create a ConfigParser object
+config = config = configparser.ConfigParser()
 
-AWS_ACCESS_KEY = "admin"
-AWS_SECRET_KEY = "123456789"
-AWS_S3_ENDPOINT = "http://minio:9000"
+# Read the configuration file
+config.read("streaming_app.ini")
 
+# Get the values of the variables from the configuration file
+KAFKA_TOPIC_NAME = config.get("KAFKA", "KAFKA_TOPIC_NAME")
+KAFKA_BOOTSTRAP_SERVER = config.get("KAFKA", "KAFKA_BOOTSTRAP_SERVER")
+
+AWS_ACCESS_KEY = config.get("aws", "AWS_ACCESS_KEY")
+AWS_SECRET_KEY = config.get("aws", "AWS_SECRET_KEY")
+AWS_S3_ENDPOINT = config.get("aws", "AWS_S3_ENDPOINT")
+
+# Create a SparkSession object
 spark = SparkSession.builder \
     .appName("Ecommerce session log analysis") \
-    .config("hive.metastore.uris", "thrift://hive-metastore:9083")\
     .config("spark.sql.warehouse.dir","s3a://data/warehouse")\
     .config("spark.hadoop.fs.s3a.access.key", AWS_ACCESS_KEY) \
     .config("spark.hadoop.fs.s3a.secret.key", AWS_SECRET_KEY) \
@@ -64,28 +70,44 @@ ecommerce_schema = StructType([
     StructField('eCommerceAction_option',StringType())]
 )
 
-df = spark \
+kafka_df = spark \
   .readStream \
   .format("kafka") \
   .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVER) \
   .option("subscribe", KAFKA_TOPIC_NAME ) \
   .load()
 
-transformed_data = df \
+transformed_data = kafka_df \
     .selectExpr("cast (value as STRING) jsonData") \
     .select (from_json("jsonData", ecommerce_schema).alias("data")) \
     .select("data.*")
 
-# Filter out rows that only contain null values
-filtered_data = transformed_data.filter(~transformed_data.columns.map(lambda c: isnull(col(c))).all())
+# Replace empty fields with null values in all columns
+transformed_df = transformed_data.na.fill("") \
+    .select([when(col(c).isin(""), None).otherwise(col(c)).alias(c) for c in kinesis_df.columns])
 
-# Replace null values with "?"
-replaced_data = filtered_data.select([when(col(c).isNull(), "?").otherwise(col(c)) for c in filtered_data.columns])
+# Create an expression to check if all of the columns are "None"
+all_none_expression = reduce(lambda x, y: x & y, [col(c) == "None" for c in transformed_df.columns])
 
-filtered_data.writeStream\
+# Remove rows that contain only the value "None"
+filtered_data = transformed_df.where(~all_none_expression)
+
+# Deduplicate the data by grouping by the unique identifier and selecting the first row
+deduplicated_df = filtered_data.groupBy("id") \
+    .agg(first("timestamp").alias("timestamp"), first("value").alias("value"))
+
+transformed_df = deduplicated_df.withColumn("country", when(col("country") == "Isareal", "Palestine").otherwise(col("country")))
+
+# Create a new column that contains time on minute
+transformed_df = transformed_df.withColumn("timeOnSiteMinute", col("timeOnSite") / 60)
+
+# Start the streaming pipeline
+query = transformed_df.writeStream\
    .outputMode("append")\
-   .format("json")\
-   .option("path", "s3a://data/Ecommerce/all_sessions")\
+   .format("delta")\
    .option("checkpointLocation", "s3a://logs/checkpoint")\
-   .toTable("all_sessions")\
-   .awaitTermination()
+   .option("path", "s3a://datalake/Ecommerce/all_sessions")\
+   .start()
+
+# Block the current thread until the streaming query terminates
+query.awaitTerminate()

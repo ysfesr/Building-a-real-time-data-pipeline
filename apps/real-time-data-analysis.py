@@ -35,79 +35,37 @@ spark = SparkSession.builder \
 
 spark.sparkContext.setLogLevel("ERROR")
 
-ecommerce_schema = StructType([
-    StructField('fullVisitorId',DoubleType()),
-    StructField('channelGrouping' ,StringType()),
-    StructField('time' ,TimestampType()),
-    StructField('country',StringType()),
-    StructField('city',StringType()),
-    StructField('totalTransactionRevenue',DoubleType()),
-    StructField('transactions' ,DoubleType()),
-    StructField('timeOnSite',DoubleType()),
-    StructField('pageviews' ,IntegerType()),
-    StructField('sessionQualityDim',DoubleType()),
-    StructField('date', DateType()),
-    StructField('visitId',IntegerType()),
-    StructField('type',StringType()),
-    StructField('productRefundAmount' ,DoubleType()),
-    StructField('productQuantity' ,DoubleType()),
-    StructField('productPrice', IntegerType()),
-    StructField('productRevenue',DoubleType()),
-    StructField('productSKU',StringType()),
-    StructField('v2ProductName',StringType()),
-    StructField('v2ProductCategory',StringType()),
-    StructField('productVariant',StringType()),
-    StructField('currencyCode',StringType()),
-    StructField('itemQuantity',DoubleType()),
-    StructField('itemRevenue',DoubleType()),
-    StructField('transactionRevenue',DoubleType()),
-    StructField('transactionId',StringType()),
-    StructField('pageTitle',StringType()),
-    StructField('searchKeyword',DoubleType()),
-    StructField('pagePathLevel1',StringType()),
-    StructField('eCommerceAction_type',IntegerType()),
-    StructField('eCommerceAction_step', IntegerType()),
-    StructField('eCommerceAction_option',StringType())]
-)
-
-kafka_df = spark \
-  .readStream \
-  .format("kafka") \
-  .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVER) \
-  .option("subscribe", KAFKA_TOPIC_NAME ) \
-  .load()
-
-transformed_data = kafka_df \
-    .selectExpr("cast (value as STRING) jsonData") \
-    .select (from_json("jsonData", ecommerce_schema).alias("data")) \
-    .select("data.*")
-
-# Replace empty fields with null values in all columns
-transformed_df = transformed_data.na.fill("") \
-    .select([when(col(c).isin(""), None).otherwise(col(c)).alias(c) for c in kinesis_df.columns])
-
-# Create an expression to check if all of the columns are "None"
-all_none_expression = reduce(lambda x, y: x & y, [col(c) == "None" for c in transformed_df.columns])
-
-# Remove rows that contain only the value "None"
-filtered_data = transformed_df.where(~all_none_expression)
-
-# Deduplicate the data by grouping by the unique identifier and selecting the first row
-deduplicated_df = filtered_data.groupBy("id") \
-    .agg(first("timestamp").alias("timestamp"), first("value").alias("value"))
-
-transformed_df = deduplicated_df.withColumn("country", when(col("country") == "Isareal", "Palestine").otherwise(col("country")))
-
-# Create a new column that contains time on minute
-transformed_df = transformed_df.withColumn("timeOnSiteMinute", col("timeOnSite") / 60)
-
-# Start the streaming pipeline
-query = transformed_df.writeStream\
-   .outputMode("append")\
+df = spark.readStream\
    .format("delta")\
-   .option("checkpointLocation", "s3a://logs/checkpoint")\
-   .option("path", "s3a://datalake/Ecommerce/all_sessions")\
-   .start()
+   .load("path", "s3a://datalake/Ecommerce/all_sessions")
 
-# Block the current thread until the streaming query terminates
-query.awaitTerminate()
+# une requête indique le nombre total de visiteurs uniques
+query1 = df.select(count("*").alias("product_views"), count(col("fullVisitorId").distinct()).alias("unique_visitors"))\
+        .writeStream\
+        .format("console")\
+        .start()
+
+# une requête indique le nombre total de visiteurs uniques (fullVisitorID) sur le site référent (channelGrouping)
+query2 = df.groupBy("channelGrouping").agg(countDistinct(col("fullVisitorId")).alias("unique_visitors"))\
+        .orderBy(col("channelGrouping").desc())\
+        .writeStream.format("console")\
+        .start()
+# une requête pour lister les cinq produits avec le plus de vues (product_views) de visiteurs uniques
+query3 = df.filter(col("type") == 'PAGE') \
+    .groupBy("v2ProductName") \
+    .agg(count("*").alias("product_views")) \
+    .orderBy(col("product_views").desc()) \
+    .select("product_views", "v2ProductName") \
+    .withColumn("rank", rank().over(Window.partitionBy().orderBy(col("product_views").desc()))) \
+    .filter(col("rank") <= 5)\
+    .writeStream.format("console").start().awaitTermination()
+
+
+## La requête ne compte plus les vues de produit en double pour les visiteurs qui ont consulté un produit plusieurs fois
+query4 = df.filter(col("type") == "PAGE")\
+        .groupBy("fullVisitorId", "v2ProductName").agg()\
+        .groupBy("ProductName")\
+        .agg(count("*").alias("unique_view_count"))\
+        .orderBy(col("unique_view_count").desc())\
+        .limit(5)\
+        .writeStream.format("console").start().awaitTermination()

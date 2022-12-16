@@ -8,7 +8,6 @@ from pyspark.sql.types import (
     DateType
 )
 
-
 ecommerce_schema = StructType([
     StructField('fullVisitorId',DoubleType()),
     StructField('channelGrouping' ,StringType()),

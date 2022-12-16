@@ -3,7 +3,6 @@ from configparser import ConfigParser
 import os.path
 from abc import ABC, abstractmethod
 
-
 class Loader(ABC):
 
     def __init__(self, path:str) -> None:
@@ -26,12 +25,14 @@ class Loader(ABC):
         return self.data
 
 
+    
 class YamlLoader(Loader):
 
     def load(self):
         self.data = yaml.safe_load(self.stream)
 
 
+        
 class IniLoader(Loader):
 
     def read_file(self) -> None:

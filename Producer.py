@@ -6,6 +6,7 @@ import time
 
 producer = KafkaProducer(bootstrap_servers=['localhost:9093'],
                          value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+
 def kafka_producer(data):
     try:
        future = producer.send('sessions', data)

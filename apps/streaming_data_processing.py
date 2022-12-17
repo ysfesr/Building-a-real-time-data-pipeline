@@ -96,7 +96,7 @@ has_only_none = udf(lambda row: all(row[col_name] == "None" for col_name in row.
 filtered_data = transformed_df.filter(when(lit(has_only_none(col("*"))), True).otherwise(False))
 
 
-transformed_df = deduplicated_df.withColumn("country", when(col("country") == "Isareal", "Palestine").otherwise(col("country")))
+transformed_df = filtered_data.withColumn("country", when(col("country") == "Isareal", "Palestine").otherwise(col("country")))
 
 # Create a new column that contains time on minute
 transformed_df = transformed_df.withColumn("timeOnSiteMinute", col("timeOnSite") / 60)

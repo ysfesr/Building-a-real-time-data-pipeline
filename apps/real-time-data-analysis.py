@@ -27,6 +27,10 @@ APP_NAME = config.get("APP", "APP_NAME")
 # Create a SparkSession object
 spark = SparkSession.builder \
     .appName(APP_NAME) \
+<<<<<<< HEAD
+    .config("spark.sql.warehouse.dir","s3a://data/warehouse")\
+=======
+>>>>>>> c88d118f940fa44c615524f06d5ed6628bf40664
     .config("spark.hadoop.fs.s3a.access.key", AWS_ACCESS_KEY) \
     .config("spark.hadoop.fs.s3a.secret.key", AWS_SECRET_KEY) \
     .config("fs.s3a.endpoint", AWS_S3_ENDPOINT)\
@@ -54,7 +58,11 @@ query1 = df.select(count("*").alias("product_views"), count(col("fullVisitorId")
 query2 = df.groupBy("channelGrouping").agg(countDistinct(col("fullVisitorId")).alias("unique_visitors"))\
         .orderBy(col("channelGrouping").desc())\
         .writeStream.format("console")\
+<<<<<<< HEAD
+        .start()
+=======
         .start().awaitTermination()
+>>>>>>> c88d118f940fa44c615524f06d5ed6628bf40664
 
 # une requête pour lister les cinq produits avec le plus de vues (product_views) de visiteurs uniques
 query3 = df.filter(col("type") == 'PAGE') \

@@ -2,12 +2,17 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import *
 from pyspark.sql.functions import *
 import configparser
+from pathlib import Path
+import os
 
 # Create a ConfigParser object
 config = config = configparser.ConfigParser()
 
 # Read the configuration file
-config.read("streaming_app.ini")
+path = Path(__file__)
+ROOT_DIR = path.parent.absolute()
+config_path = os.path.join(ROOT_DIR, "streaming_app.ini")
+config.read(config_path)
 
 # Get the values of the variables from the configuration file
 KAFKA_TOPIC_NAME = config.get("KAFKA", "KAFKA_TOPIC_NAME")
@@ -20,7 +25,6 @@ AWS_S3_ENDPOINT = config.get("aws", "AWS_S3_ENDPOINT")
 # Create a SparkSession object
 spark = SparkSession.builder \
     .appName("Ecommerce session log processing") \
-    .config("spark.sql.warehouse.dir","s3a://data/warehouse")\
     .config("spark.hadoop.fs.s3a.access.key", AWS_ACCESS_KEY) \
     .config("spark.hadoop.fs.s3a.secret.key", AWS_SECRET_KEY) \
     .config("fs.s3a.endpoint", AWS_S3_ENDPOINT)\
@@ -30,7 +34,6 @@ spark = SparkSession.builder \
     .config('spark.hadoop.fs.s3a.aws.credentials.provider', 'org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider')\
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
     .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")\
-    .enableHiveSupport()\
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("ERROR")
@@ -84,19 +87,16 @@ transformed_data = kafka_df \
 
 # Replace empty fields with null values in all columns
 transformed_df = transformed_data.na.fill("") \
-    .select([when(col(c).isin(""), None).otherwise(col(c)).alias(c) for c in kinesis_df.columns])
+    .select([when(col(c).isin(""), None).otherwise(col(c)).alias(c) for c in transformed_data.columns])
 
-# Create an expression to check if all of the columns are "None"
-all_none_expression = reduce(lambda x, y: x & y, [col(c) == "None" for c in transformed_df.columns])
+# Define a UDF to check if all columns in a row have the value "None"
+has_only_none = udf(lambda row: all(row[col_name] == "None" for col_name in row.columns))
 
-# Remove rows that contain only the value "None"
-filtered_data = transformed_df.where(~all_none_expression)
+# Filter out rows with only "None" values
+filtered_data = transformed_df.filter(when(lit(has_only_none(col("*"))), True).otherwise(False))
 
-# Deduplicate the data by grouping by the unique identifier and selecting the first row
-deduplicated_df = filtered_data.groupBy("id") \
-    .agg(first("timestamp").alias("timestamp"), first("value").alias("value"))
 
-transformed_df = deduplicated_df.withColumn("country", when(col("country") == "Isareal", "Palestine").otherwise(col("country")))
+transformed_df = filtered_data.withColumn("country", when(col("country") == "Isareal", "Palestine").otherwise(col("country")))
 
 # Create a new column that contains time on minute
 transformed_df = transformed_df.withColumn("timeOnSiteMinute", col("timeOnSite") / 60)

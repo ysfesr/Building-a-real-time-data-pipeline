@@ -17,6 +17,7 @@ def kafka_producer(data):
        print(e)
 
 tmp = 0
+
 with open("data/all_session.csv") as f:
     fdict = csv.DictReader(f, delimiter=",")
     for row in fdict:

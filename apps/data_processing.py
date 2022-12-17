@@ -1,5 +1,4 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.types import *
 from pyspark.sql.functions import *
 from includes import SparkFactory
 from includes.Loader import IniLoader, YamlLoader
@@ -7,9 +6,9 @@ from models.ECommerceSchema import ecommerce_schema
 
 
 spark:SparkSession = SparkFactory.Factory(
-    YamlLoader("config.yaml").get_data(), 
-    IniLoader("app.ini").get_data()
-).get()
+    YamlLoader("assets/config.yaml").get_data(), 
+    IniLoader("assets/app.ini").get_data()
+).create()
 
 
 df = spark.readStream\
@@ -23,6 +22,7 @@ kafka_df = spark \
   .option("kafka.bootstrap.servers", IniLoader("app.ini").get_data()["KAFKA"]["kafka_topic_name"]) \
   .option("subscribe", IniLoader("app.ini").get_data()["KAFKA"]["kafka_bootstrap_server"]) \
   .load()
+
 
 transformed_data = kafka_df \
     .selectExpr("cast (value as STRING) jsonData") \

@@ -26,7 +26,7 @@ class Factory:
         return spark
         
 
-    def get(self):
+    def create(self):
         spark = SparkSession.builder.appName(self.app["APP"]["app_name"])
         
         spark = self.auth(spark)

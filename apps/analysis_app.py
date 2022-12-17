@@ -5,12 +5,14 @@ from pyspark.sql.types import *
 from pyspark.sql.functions import *
 
 
+# Return a SparkSession
 spark:SparkSession = SparkFactory.Factory(
-    YamlLoader("config.yaml").get_data(), 
-    IniLoader("app.ini").get_data()
-).get()
+    YamlLoader("assets/config.yaml").get_data(), 
+    IniLoader("assets/app.ini").get_data()
+).create()
 
 
+# Reads the stream
 df = spark.readStream\
    .format("delta")\
    .load("path", "s3a://datalake/Ecommerce/all_sessions")

@@ -3,3 +3,4 @@ kafka
 minio
 cmds.sh
 apps/test
+.env

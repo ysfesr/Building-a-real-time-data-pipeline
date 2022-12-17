@@ -2,12 +2,17 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import *
 from pyspark.sql.functions import *
 import configparser
+from pathlib import Path
+import os
 
 # Create a ConfigParser object
 config = config = configparser.ConfigParser()
 
 # Read the configuration file
-config.read("streaming_app.ini")
+path = Path(__file__)
+ROOT_DIR = path.parent.absolute()
+config_path = os.path.join(ROOT_DIR, "streaming_app.ini")
+config.read(config_path)
 
 # Get the values of the variables from the configuration file
 KAFKA_TOPIC_NAME = config.get("KAFKA", "KAFKA_TOPIC_NAME")
@@ -22,7 +27,6 @@ APP_NAME = config.get("APP", "APP_NAME")
 # Create a SparkSession object
 spark = SparkSession.builder \
     .appName(APP_NAME) \
-    .config("spark.sql.warehouse.dir","s3a://data/warehouse")\
     .config("spark.hadoop.fs.s3a.access.key", AWS_ACCESS_KEY) \
     .config("spark.hadoop.fs.s3a.secret.key", AWS_SECRET_KEY) \
     .config("fs.s3a.endpoint", AWS_S3_ENDPOINT)\
@@ -32,7 +36,6 @@ spark = SparkSession.builder \
     .config('spark.hadoop.fs.s3a.aws.credentials.provider', 'org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider')\
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
     .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")\
-    .enableHiveSupport()\
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("ERROR")
@@ -45,13 +48,13 @@ df = spark.readStream\
 query1 = df.select(count("*").alias("product_views"), count(col("fullVisitorId").distinct()).alias("unique_visitors"))\
         .writeStream\
         .format("console")\
-        .start()
+        .start().awaitTermination()
 
 # une requête indique le nombre total de visiteurs uniques (fullVisitorID) sur le site référent (channelGrouping)
 query2 = df.groupBy("channelGrouping").agg(countDistinct(col("fullVisitorId")).alias("unique_visitors"))\
         .orderBy(col("channelGrouping").desc())\
         .writeStream.format("console")\
-        .start()
+        .start().awaitTermination()
 
 # une requête pour lister les cinq produits avec le plus de vues (product_views) de visiteurs uniques
 query3 = df.filter(col("type") == 'PAGE') \
